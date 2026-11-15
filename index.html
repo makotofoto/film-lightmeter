@@ -52,6 +52,14 @@
     background:rgba(232,184,75,.92); color:#1a1405; font-weight:700;
     padding:4px 10px; border-radius:10px; font-size:13px;
   }
+  #compWrap{
+    position:absolute; left:50%; bottom:42px; transform:translateX(-50%);
+    width:78%; z-index:3; display:none; align-items:center; gap:8px;
+    background:rgba(16,17,20,.65); padding:7px 12px; border-radius:12px;
+  }
+  #compWrap .cv{font-size:12px; color:#cfcdc6; white-space:nowrap;}
+  #compWrap b{color:var(--accent); font-variant-numeric:tabular-nums;}
+  #comp{flex:1; accent-color:var(--accent); margin:0;}
 
   /* 相機切換列 */
   #camStrip{
@@ -156,6 +164,11 @@
   <button id="gear" title="設定">⚙</button>
   <span id="evTag">EV <b id="evVal">12</b></span>
   <span id="lockTag">📸 已鎖定</span>
+  <div id="compWrap">
+    <span class="cv">暗</span>
+    <input type="range" id="comp" min="-2" max="2" step="0.333" value="0">
+    <span class="cv">亮 <b id="compVal">0</b></span>
+  </div>
 </div>
 
 <div id="camStrip"></div>
@@ -311,7 +324,9 @@ function markAct(el, idx){
   [...el.children].forEach((c,i)=>c.classList.toggle("act", i===idx));
 }
 
-function evIso(){ return ev + log2(st.iso/100); }
+let lockEv = null, comp = 0, lastDev = 0;   // 拍照鎖定基準、明暗補償、目前組合偏差
+function evNow(){ return (locked && lockEv!==null) ? lockEv - comp : ev; }
+function evIso(){ return evNow() + log2(st.iso/100); }
 function reqShutter(n){ return (n*n)/Math.pow(2, evIso()); }
 
 function alignShutter(smooth){
@@ -322,12 +337,20 @@ function alignShutter(smooth){
 }
 function updateDev(t, tReq){
   const dev = log2(t/tReq);
+  lastDev = dev;
   const a = Math.abs(dev);
   if (a < 0.34){ bandDev.textContent = "✓"; bandDev.className = "ok"; }
   else{
     bandDev.textContent = (dev>0?"+":"−") + a.toFixed(1) + "EV";
     bandDev.className = dev>0 ? "plus" : "minus";
   }
+  applyFilter();
+}
+/* 照片明暗 = 補償 + 目前組合相對測光值的偏差（過曝變亮、欠曝變暗） */
+function applyFilter(){
+  if (!locked) return;
+  const b = Math.max(0.15, Math.min(6, Math.pow(2, comp + lastDev)));
+  freeze.style.filter = `brightness(${b.toFixed(3)})`;
 }
 
 function onScroll(el, key, fn){
@@ -378,15 +401,38 @@ document.getElementById("meterBox").addEventListener("click", async e=>{
   if (!running){ await startCam(); return; }
   locked = !locked;
   if (locked && video.videoWidth){           // 拍照：凍結目前畫面
+    lockEv = ev; comp = 0; lastDev = 0;
+    compEl.value = 0; compVal.textContent = "0";
     freeze.width = video.videoWidth;
     freeze.height = video.videoHeight;
     fCtx.drawImage(video, 0, 0);
+    freeze.style.filter = "brightness(1)";
     freeze.style.display = "block";
+    compWrap.style.display = "flex";
+    alignShutter(false);
   } else {
+    locked = false;
     freeze.style.display = "none";           // 回到即時畫面
+    compWrap.style.display = "none";
+    comp = 0; lockEv = null;
+    evVal.textContent = (Math.round(ev*10)/10).toString();
+    alignShutter(false);
   }
   lockTag.style.display = locked ? "block" : "none";
 });
+
+/* 明暗滑桿：照片變亮/變暗，光圈快門 ISO 連動重算 */
+const compWrap = document.getElementById("compWrap");
+const compEl   = document.getElementById("comp");
+const compVal  = document.getElementById("compVal");
+compEl.addEventListener("input", ()=>{
+  comp = Math.round(+compEl.value*3)/3;
+  compVal.textContent = (comp>0?"+":"") + (Math.round(comp*10)/10);
+  evVal.textContent = (Math.round(evNow()*10)/10).toString();
+  alignShutter(false);   // 內含 applyFilter
+});
+compEl.addEventListener("click", e=>e.stopPropagation());
+compWrap.addEventListener("click", e=>e.stopPropagation());
 
 async function startCam(){
   overlay.querySelector(".big").textContent = "啟動中…";
