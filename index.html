@@ -23,9 +23,10 @@
   /* 取景 + EV */
   #meterBox{
     position:relative; border-radius:16px; overflow:hidden; background:#000;
-    height:170px; cursor:pointer; border:1px solid var(--line);
+    height:280px; cursor:pointer; border:1px solid var(--line);
   }
   #view{width:100%; height:100%; object-fit:cover; display:block;}
+  #freeze{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:none; z-index:1;}
   #ring{position:absolute; left:50%; top:50%; width:76px; height:76px; transform:translate(-50%,-50%);
     border:1.5px solid rgba(232,184,75,.85); border-radius:50%; pointer-events:none; display:none;}
   #overlay{
@@ -146,14 +147,15 @@
 
 <div id="meterBox">
   <video id="view" autoplay playsinline muted></video>
+  <canvas id="freeze"></canvas>
   <div id="ring"></div>
   <div id="overlay">
     <span class="big">點一下開始測光</span>
-    <span class="sm">對準被攝體，再點一下可鎖定讀數</span>
+    <span class="sm">對準被攝體，再點一下拍照鎖定讀數</span>
   </div>
   <button id="gear" title="設定">⚙</button>
   <span id="evTag">EV <b id="evVal">12</b></span>
-  <span id="lockTag">已鎖定</span>
+  <span id="lockTag">📸 已鎖定</span>
 </div>
 
 <div id="camStrip"></div>
@@ -297,8 +299,12 @@ function centerIdx(el, arr){
   return Math.max(0, Math.min(arr.length-1, Math.round(el.scrollTop/ITEM)));
 }
 function snapTo(el, key, idx, smooth){
-  prog[key] = true;
-  el.scrollTo({ top: idx*ITEM, behavior: smooth ? "smooth" : "auto" });
+  const target = idx*ITEM;
+  // 位置不變就不捲動，避免 prog 旗標卡住、吃掉使用者下一次滑動
+  if (Math.abs(el.scrollTop - target) > 1){
+    prog[key] = true;
+    el.scrollTo({ top: target, behavior: smooth ? "smooth" : "auto" });
+  }
   markAct(el, idx);
 }
 function markAct(el, idx){
@@ -364,10 +370,21 @@ const cv = document.createElement("canvas");
 cv.width=64; cv.height=48;
 const cx2 = cv.getContext("2d",{willReadFrequently:true});
 
+const freeze = document.getElementById("freeze");
+const fCtx = freeze.getContext("2d");
+
 document.getElementById("meterBox").addEventListener("click", async e=>{
   if (e.target.closest("#gear")) return;
   if (!running){ await startCam(); return; }
   locked = !locked;
+  if (locked && video.videoWidth){           // 拍照：凍結目前畫面
+    freeze.width = video.videoWidth;
+    freeze.height = video.videoHeight;
+    fCtx.drawImage(video, 0, 0);
+    freeze.style.display = "block";
+  } else {
+    freeze.style.display = "none";           // 回到即時畫面
+  }
   lockTag.style.display = locked ? "block" : "none";
 });
 
