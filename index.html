@@ -218,7 +218,8 @@ const log2 = x => Math.log(x)/Math.LN2;
 const ITEM = 46;
 
 const STD_AP  = [1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22];
-const STD_SH  = [1, 1/2, 1/4, 1/8, 1/15, 1/30, 1/60, 1/125, 1/250, 1/500, 1/1000];
+const STD_SH  = [1, 1/2, 1/4, 1/8, 1/15, 1/30, 1/60, 1/125, 1/250, 1/500, 1/1000, 1/2000, 1/4000];
+const OLD_STD_SH = [1, 1/2, 1/4, 1/8, 1/15, 1/30, 1/60, 1/125, 1/250, 1/500, 1/1000];
 const STD_ISO = [50, 100, 200, 400, 800, 1600, 3200];
 
 let st = {
@@ -244,6 +245,17 @@ if (!st.cameras || !st.cameras.length)
   st.cameras = [{id:0, name:"預設", ap:[...STD_AP], sh:[...STD_SH]}];
 if (!st.cameras.some(c=>c.id===st.camId)) st.camId = st.cameras[0].id;
 const save = ()=>localStorage.setItem(LS, JSON.stringify(st));
+
+/* 一次性搬移：仍是舊標準快門列表（未自訂過）的相機，延伸到 1/4000 */
+if (!st.mig4000){
+  for (const c of st.cameras){
+    const cur = [...c.sh].sort((a,b)=>b-a);
+    const old = [...OLD_STD_SH].sort((a,b)=>b-a);
+    if (cur.length===old.length && cur.every((v,i)=>Math.abs(log2(v/old[i]))<0.02))
+      c.sh = [...STD_SH];
+  }
+  st.mig4000 = true; save();
+}
 
 const cam = ()=>st.cameras.find(c=>c.id===st.camId);
 const apList  = ()=>[...cam().ap].sort((a,b)=>a-b);
