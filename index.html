@@ -203,9 +203,15 @@
   <div class="addrow"><input id="isoIn" inputmode="numeric" placeholder="例：320"><button data-k="iso">＋</button></div>
   <div class="hint2">黃色為自訂 ISO，點一下可刪除。</div>
 
-  <div class="lbl">測光校正（讀數偏暗往右、偏亮往左）</div>
-  <input type="range" id="cal" min="-4" max="4" step="0.1">
-  <div class="hint2">偏移 <b id="calVal">0.0</b> EV。手機會自動曝光，第一次請對照可信的曝光（例如晴天 f/16、1/ISO 秒）拖到讀數相符，之後就固定。</div>
+  <div class="lbl">快速校正（測光進行中，對準場景後點一下）</div>
+  <div class="chips" id="quickCal">
+    <span class="custom" data-ev="15">☀️ 這是晴天</span>
+    <span class="custom" data-ev="12">☁️ 這是陰天</span>
+    <span class="custom" data-ev="7">🏠 這是室內</span>
+  </div>
+  <div class="lbl">微調（偏暗往右、偏亮往左）<span id="calMode"></span></div>
+  <input type="range" id="cal" min="-6" max="6" step="0.1">
+  <div class="hint2">偏移 <b id="calVal">0.0</b> EV。校正一次後同一支手機就穩定。也可對照已知曝光（晴天 f/16、1/ISO 秒）微調。</div>
 
   <div class="closerow"><button id="dlgClose">完成</button></div>
 </dialog>
@@ -223,7 +229,7 @@ const OLD_STD_SH = [1, 1/2, 1/4, 1/8, 1/15, 1/30, 1/60, 1/125, 1/250, 1/500, 1/1
 const STD_ISO = [50, 100, 200, 400, 800, 1600, 3200];
 
 let st = {
-  ap:8, iso:400, lastEv:12, cal:0, capIso:[],
+  ap:8, iso:400, lastEv:12, cal:0, calM:0, capIso:[],
   camId:0,
   cameras:[{ id:0, name:"預設", ap:[...STD_AP], sh:[...STD_SH] }],
 };
@@ -393,7 +399,7 @@ onScroll(isoW, "iso", idx=>{
 });
 
 /* ---------- 測光 ---------- */
-let running=false, locked=false, stream=null, smooth=null;
+let running=false, locked=false, stream=null, smooth=null, meterMode="est";
 const video   = document.getElementById("view");
 const overlay = document.getElementById("overlay");
 const ring    = document.getElementById("ring");
@@ -483,7 +489,20 @@ function loop(){
     sum += lum*k; w += k;
   }
   const avg = Math.max(sum/w, 1e-6);
-  let e = 15 + log2(avg/0.18) + st.cal;
+
+  // 優先用相機回報的曝光資料（Android Chrome 支援）：AE 的影響可被正確抵銷，準確度高
+  let e;
+  const trk = stream && stream.getVideoTracks()[0];
+  const set = trk ? trk.getSettings() : {};
+  if (set.exposureTime > 0 && set.iso > 0){
+    meterMode = "meta";
+    const tSec = set.exposureTime / 10000;          // 規格單位：100 微秒
+    e = log2(avg/0.18) + log2(1/tSec) + log2(100/set.iso) + 4.7 + st.calM;
+  } else {
+    meterMode = "est";                              // iPhone 等：只能估算，務必校正
+    // AE 會把亮暗差異壓扁，乘上增益反壓縮；再由快速校正錨定絕對值
+    e = 15 + 2.2*log2(avg/0.18) + st.cal;
+  }
   e = Math.max(-4, Math.min(21, e));
   smooth = smooth===null ? e : smooth*0.85 + e*0.15;
   const r1 = Math.round(smooth*3)/3;
@@ -500,10 +519,29 @@ const cal = document.getElementById("cal");
 const calVal = document.getElementById("calVal");
 document.getElementById("gear").onclick = e=>{ e.stopPropagation(); renderDlg(); dlg.showModal(); };
 document.getElementById("dlgClose").onclick = ()=>{ dlg.close(); };
-cal.oninput = ()=>{ st.cal=+cal.value; calVal.textContent=st.cal.toFixed(1); save(); };
+
+const getCal = ()=> meterMode==="meta" ? st.calM : st.cal;
+const setCal = v =>{ if (meterMode==="meta") st.calM=v; else st.cal=v; save(); };
+cal.oninput = ()=>{ setCal(+cal.value); calVal.textContent=getCal().toFixed(1); };
+
+/* 快速校正：讓目前讀數對上使用者指定的場景 EV */
+for (const b of document.querySelectorAll("#quickCal span")){
+  b.onclick = ()=>{
+    if (!running){ alert("請先回主畫面開始測光，對準場景後再點"); return; }
+    const target = +b.dataset.ev;
+    setCal(getCal() + (target - ev));
+    ev = target; st.lastEv = ev; save();
+    smooth = null;                       // 重新平滑，立即生效
+    evVal.textContent = String(target);
+    cal.value = getCal(); calVal.textContent = getCal().toFixed(1);
+    alignShutter(false);
+  };
+}
 
 function renderDlg(){
-  cal.value = st.cal; calVal.textContent = st.cal.toFixed(1);
+  cal.value = getCal(); calVal.textContent = getCal().toFixed(1);
+  document.getElementById("calMode").textContent =
+    running ? (meterMode==="meta" ? "｜來源：相機曝光資料（較準）" : "｜來源：影像估算（請先快速校正）") : "";
 
   // 相機列
   const camChips = document.getElementById("camChips");
