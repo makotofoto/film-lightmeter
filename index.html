@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101114">
+<title>測光錶</title>
+<style>
+  :root{
+    --bg:#101114; --panel:#1a1c20; --line:#2e3138;
+    --text:#ece9e2; --dim:#6f6d66; --accent:#e8b84b;
+    --good:#7fc97f; --bad:#e86b5c;
+    --item:46px; --wheel:322px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif;
+    max-width:430px; margin:0 auto; padding:10px 10px 24px;
+  }
+
+  /* 取景 + EV */
+  #meterBox{
+    position:relative; border-radius:16px; overflow:hidden; background:#000;
+    height:170px; cursor:pointer; border:1px solid var(--line);
+  }
+  #view{width:100%; height:100%; object-fit:cover; display:block;}
+  #ring{position:absolute; left:50%; top:50%; width:76px; height:76px; transform:translate(-50%,-50%);
+    border:1.5px solid rgba(232,184,75,.85); border-radius:50%; pointer-events:none; display:none;}
+  #overlay{
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:6px; text-align:center;
+  }
+  #overlay .big{font-size:17px; font-weight:700;}
+  #overlay .sm{font-size:12px; color:#9a9890;}
+  #gear{
+    position:absolute; top:8px; right:10px; z-index:2;
+    background:rgba(16,17,20,.55); border:none; color:#cfcdc6;
+    font-size:18px; cursor:pointer; padding:5px 9px; border-radius:10px;
+  }
+  #evTag{
+    position:absolute; left:10px; bottom:8px; z-index:2;
+    font-variant-numeric:tabular-nums; background:rgba(16,17,20,.6);
+    padding:4px 10px; border-radius:10px; font-size:14px; color:#9a9890;
+  }
+  #evTag b{color:#9a9890; font-size:19px;}
+  #evTag.live b{color:var(--accent);}
+  #lockTag{
+    position:absolute; right:10px; bottom:8px; z-index:2; display:none;
+    background:rgba(232,184,75,.92); color:#1a1405; font-weight:700;
+    padding:4px 10px; border-radius:10px; font-size:13px;
+  }
+
+  /* 相機切換列 */
+  #camStrip{
+    display:flex; gap:6px; overflow-x:auto; padding:2px; margin-top:10px;
+    scrollbar-width:none;
+  }
+  #camStrip::-webkit-scrollbar{display:none;}
+  #camStrip button{
+    flex:0 0 auto; padding:6px 13px; border-radius:999px; font-size:13px;
+    border:1px solid var(--line); background:var(--panel); color:#9a9890; cursor:pointer;
+  }
+  #camStrip button.on{background:var(--accent); border-color:var(--accent); color:#1a1405; font-weight:700;}
+
+  /* 三欄轉輪 */
+  .heads{display:flex; gap:8px; margin-top:8px;}
+  .heads span{
+    font-size:11px; color:#9a9890; letter-spacing:.12em; text-align:center;
+  }
+  .heads .h-ap{flex:1;} .heads .h-sh{flex:1.15;} .heads .h-iso{width:86px; flex:0 0 auto;}
+
+  .wheelsWrap{position:relative; display:flex; gap:8px; margin-top:6px;}
+  .wheel{
+    height:var(--wheel); overflow-y:auto; scroll-snap-type:y mandatory;
+    padding:calc((var(--wheel) - var(--item))/2) 0;
+    scrollbar-width:none; border:1px solid var(--line); border-radius:14px;
+    background:var(--panel); position:relative;
+  }
+  .wheel::-webkit-scrollbar{display:none;}
+  #apW{flex:1;} #shW{flex:1.15;} #isoW{width:86px; flex:0 0 auto;}
+  .wheel .it{
+    height:var(--item); display:flex; align-items:center; justify-content:center;
+    scroll-snap-align:center; font-size:19px; font-weight:700;
+    font-variant-numeric:tabular-nums; color:var(--dim);
+  }
+  .wheel .it.act{color:var(--text); font-size:21px;}
+
+  .band{
+    position:absolute; left:0; right:0; top:calc(50% - var(--item)/2);
+    height:var(--item); pointer-events:none; z-index:2;
+    border-top:1.5px solid var(--accent); border-bottom:1.5px solid var(--accent);
+    background:rgba(232,184,75,.07);
+  }
+  #bandDev{
+    position:absolute; right:-2px; top:-24px;
+    font-size:12px; font-weight:700; font-variant-numeric:tabular-nums;
+    padding:2px 8px; border-radius:8px; background:var(--panel);
+    border:1px solid var(--line);
+  }
+  #bandDev.ok{color:var(--good);}
+  #bandDev.plus{color:var(--accent);}
+  #bandDev.minus{color:var(--bad);}
+
+  /* 設定 */
+  dialog{
+    background:var(--panel); color:var(--text); border:1px solid var(--line);
+    border-radius:16px; padding:18px; width:min(92vw,360px);
+  }
+  dialog::backdrop{background:rgba(0,0,0,.65);}
+  dialog h3{margin:0 0 4px; font-size:16px;}
+  .lbl{font-size:11px; color:#9a9890; margin:14px 0 6px; letter-spacing:.1em;}
+  .chips{display:flex; flex-wrap:wrap; gap:6px;}
+  .chips span, .chips button{
+    padding:5px 10px; border-radius:999px; border:1px solid var(--line);
+    font-size:13px; font-variant-numeric:tabular-nums; background:transparent; color:var(--text);
+  }
+  .chips span{cursor:pointer;}
+  .chips button{cursor:pointer;}
+  .chips button.on{background:var(--accent); border-color:var(--accent); color:#1a1405; font-weight:700;}
+  .chips span.custom{border-color:var(--accent); color:var(--accent);}
+  .addrow{display:flex; gap:8px; margin-top:8px;}
+  .addrow input{
+    flex:1; min-width:0; padding:8px 10px; font-size:15px; border-radius:10px;
+    border:1px solid var(--line); background:var(--bg); color:var(--text);
+  }
+  .addrow button{
+    padding:8px 14px; border-radius:10px; border:none; background:var(--accent);
+    color:#1a1405; font-weight:700; cursor:pointer;
+  }
+  #camDel{
+    margin-top:8px; padding:7px 12px; border-radius:10px; font-size:13px;
+    border:1px solid var(--line); background:transparent; color:var(--bad); cursor:pointer;
+  }
+  input[type=range]{width:100%; accent-color:var(--accent);}
+  .hint2{font-size:11px; color:#9a9890; margin-top:4px; line-height:1.6;}
+  .closerow{margin-top:18px; text-align:right;}
+  .closerow button{
+    padding:9px 18px; border-radius:10px; border:1px solid var(--line);
+    background:var(--bg); color:var(--text); cursor:pointer;
+  }
+</style>
+</head>
+<body>
+
+<div id="meterBox">
+  <video id="view" autoplay playsinline muted></video>
+  <div id="ring"></div>
+  <div id="overlay">
+    <span class="big">點一下開始測光</span>
+    <span class="sm">對準被攝體，再點一下可鎖定讀數</span>
+  </div>
+  <button id="gear" title="設定">⚙</button>
+  <span id="evTag">EV <b id="evVal">12</b></span>
+  <span id="lockTag">已鎖定</span>
+</div>
+
+<div id="camStrip"></div>
+
+<div class="heads"><span class="h-ap">光圈</span><span class="h-sh">快門</span><span class="h-iso">ISO</span></div>
+<div class="wheelsWrap">
+  <div class="band"><span id="bandDev" class="ok">✓</span></div>
+  <div class="wheel" id="apW"></div>
+  <div class="wheel" id="shW"></div>
+  <div class="wheel" id="isoW"></div>
+</div>
+
+<dialog id="dlg">
+  <h3>設定</h3>
+
+  <div class="lbl">相機（點選切換；光圈快門是每台各自儲存）</div>
+  <div class="chips" id="camChips"></div>
+  <div class="addrow"><input id="camIn" placeholder="例：FM2、Rolleiflex 3.5F"><button data-k="cam">＋</button></div>
+  <button id="camDel">刪除目前相機</button>
+
+  <div class="lbl" id="apLbl">光圈</div>
+  <div class="chips" id="apChips"></div>
+  <div class="addrow"><input id="apIn" inputmode="decimal" placeholder="例：3.5"><button data-k="ap">＋</button></div>
+
+  <div class="lbl" id="shLbl">快門</div>
+  <div class="chips" id="shChips"></div>
+  <div class="addrow"><input id="shIn" placeholder="例：1/25 或 2"><button data-k="sh">＋</button></div>
+  <div class="hint2">點任一數值可從這台相機移除（老相機沒有的檔位直接刪掉）；輸入後按＋加入。</div>
+
+  <div class="lbl">ISO（底片，所有相機共用）</div>
+  <div class="chips" id="isoChips"></div>
+  <div class="addrow"><input id="isoIn" inputmode="numeric" placeholder="例：320"><button data-k="iso">＋</button></div>
+  <div class="hint2">黃色為自訂 ISO，點一下可刪除。</div>
+
+  <div class="lbl">測光校正（讀數偏暗往右、偏亮往左）</div>
+  <input type="range" id="cal" min="-4" max="4" step="0.1">
+  <div class="hint2">偏移 <b id="calVal">0.0</b> EV。手機會自動曝光，第一次請對照可信的曝光（例如晴天 f/16、1/ISO 秒）拖到讀數相符，之後就固定。</div>
+
+  <div class="closerow"><button id="dlgClose">完成</button></div>
+</dialog>
+
+<script>
+"use strict";
+const LS = "filmmeter-wheel-v2";
+const LS_V1 = "filmmeter-wheel-v1";
+const log2 = x => Math.log(x)/Math.LN2;
+const ITEM = 46;
+
+const STD_AP  = [1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22];
+const STD_SH  = [1, 1/2, 1/4, 1/8, 1/15, 1/30, 1/60, 1/125, 1/250, 1/500, 1/1000];
+const STD_ISO = [50, 100, 200, 400, 800, 1600, 3200];
+
+let st = {
+  ap:8, iso:400, lastEv:12, cal:0, capIso:[],
+  camId:0,
+  cameras:[{ id:0, name:"預設", ap:[...STD_AP], sh:[...STD_SH] }],
+};
+try{
+  const saved = JSON.parse(localStorage.getItem(LS)||"null");
+  if (saved){ Object.assign(st, saved); }
+  else{
+    const v1 = JSON.parse(localStorage.getItem(LS_V1)||"null");
+    if (v1){   // 從舊版搬移：自訂值併入預設相機
+      st.ap = v1.ap ?? 8; st.iso = v1.iso ?? 400;
+      st.lastEv = v1.lastEv ?? 12; st.cal = v1.cal ?? 0;
+      st.capIso = v1.capIso ?? [];
+      st.cameras[0].ap = [...new Set([...STD_AP, ...(v1.capAp||[])])];
+      st.cameras[0].sh = [...new Set([...STD_SH, ...(v1.capSh||[])])];
+    }
+  }
+}catch(e){}
+if (!st.cameras || !st.cameras.length)
+  st.cameras = [{id:0, name:"預設", ap:[...STD_AP], sh:[...STD_SH]}];
+if (!st.cameras.some(c=>c.id===st.camId)) st.camId = st.cameras[0].id;
+const save = ()=>localStorage.setItem(LS, JSON.stringify(st));
+
+const cam = ()=>st.cameras.find(c=>c.id===st.camId);
+const apList  = ()=>[...cam().ap].sort((a,b)=>a-b);
+const shList  = ()=>[...cam().sh].sort((a,b)=>b-a); // 慢→快
+const isoList = ()=>[...new Set([...STD_ISO, ...st.capIso])].sort((a,b)=>a-b);
+
+const fmtAp = n => "f/" + (+n.toFixed(1)).toString().replace(/\.0$/,"");
+const fmtSh = t => t>=1 ? (+t.toFixed(1)).toString().replace(/\.0$/,"")+"s"
+                        : "1/"+(1/t>=10 ? Math.round(1/t) : +(1/t).toFixed(1));
+
+let ev = st.lastEv;
+
+/* ---------- 相機切換列 ---------- */
+const camStrip = document.getElementById("camStrip");
+function renderCamStrip(){
+  camStrip.innerHTML = "";
+  camStrip.style.display = st.cameras.length>1 ? "flex" : "none";
+  for (const c of st.cameras){
+    const b = document.createElement("button");
+    b.className = c.id===st.camId ? "on" : "";
+    b.textContent = "📷 " + c.name;
+    b.onclick = ()=>{ st.camId=c.id; save(); renderCamStrip(); rebuildWheels(); };
+    camStrip.appendChild(b);
+  }
+}
+
+/* ---------- 轉輪 ---------- */
+const apW  = document.getElementById("apW");
+const shW  = document.getElementById("shW");
+const isoW = document.getElementById("isoW");
+const bandDev = document.getElementById("bandDev");
+
+let apArr=[], shArr=[], isoArr=[];
+const prog = { ap:false, sh:false, iso:false };
+const timers = {};
+
+function buildWheel(el, arr, fmt){
+  el.innerHTML = "";
+  for (const v of arr){
+    const d = document.createElement("div");
+    d.className = "it";
+    d.textContent = fmt(v);
+    el.appendChild(d);
+  }
+}
+const apDist  = (a,b)=>Math.abs(log2((a*a)/(b*b)));
+const shDist  = (a,b)=>Math.abs(log2(a/b));
+function nearestIdx(arr, v, dist){
+  let bi=0, bd=Infinity;
+  arr.forEach((x,i)=>{ const d=dist(x,v); if(d<bd){bd=d;bi=i;} });
+  return bi;
+}
+function rebuildWheels(){
+  apArr = apList(); shArr = shList(); isoArr = isoList();
+  buildWheel(apW, apArr, fmtAp);
+  buildWheel(shW, shArr, fmtSh);
+  buildWheel(isoW, isoArr, v=>String(v));
+  const ai = nearestIdx(apArr, st.ap, apDist);
+  st.ap = apArr[ai];
+  if (!isoArr.includes(st.iso)) st.iso = isoArr.includes(400) ? 400 : isoArr[0];
+  snapTo(apW, "ap", ai, false);
+  snapTo(isoW, "iso", isoArr.indexOf(st.iso), false);
+  alignShutter(false);
+}
+function centerIdx(el, arr){
+  return Math.max(0, Math.min(arr.length-1, Math.round(el.scrollTop/ITEM)));
+}
+function snapTo(el, key, idx, smooth){
+  prog[key] = true;
+  el.scrollTo({ top: idx*ITEM, behavior: smooth ? "smooth" : "auto" });
+  markAct(el, idx);
+}
+function markAct(el, idx){
+  [...el.children].forEach((c,i)=>c.classList.toggle("act", i===idx));
+}
+
+function evIso(){ return ev + log2(st.iso/100); }
+function reqShutter(n){ return (n*n)/Math.pow(2, evIso()); }
+
+function alignShutter(smooth){
+  const tReq = reqShutter(st.ap);
+  const idx = nearestIdx(shArr, tReq, shDist);
+  snapTo(shW, "sh", idx, smooth);
+  updateDev(shArr[idx], tReq);
+}
+function updateDev(t, tReq){
+  const dev = log2(t/tReq);
+  const a = Math.abs(dev);
+  if (a < 0.34){ bandDev.textContent = "✓"; bandDev.className = "ok"; }
+  else{
+    bandDev.textContent = (dev>0?"+":"−") + a.toFixed(1) + "EV";
+    bandDev.className = dev>0 ? "plus" : "minus";
+  }
+}
+
+function onScroll(el, key, fn){
+  el.addEventListener("scroll", ()=>{
+    markAct(el, centerIdx(el, {ap:apArr, sh:shArr, iso:isoArr}[key]));
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(()=>{
+      if (prog[key]){ prog[key] = false; return; }
+      fn(centerIdx(el, {ap:apArr, sh:shArr, iso:isoArr}[key]));
+    }, 140);
+  }, {passive:true});
+}
+onScroll(apW, "ap", idx=>{
+  st.ap = apArr[idx]; save();
+  alignShutter(true);
+});
+onScroll(shW, "sh", idx=>{
+  const t = shArr[idx];
+  const nReq = Math.sqrt(t * Math.pow(2, evIso()));
+  const ai = nearestIdx(apArr, nReq, apDist);
+  st.ap = apArr[ai]; save();
+  snapTo(apW, "ap", ai, true);
+  updateDev(t, reqShutter(st.ap));
+});
+onScroll(isoW, "iso", idx=>{
+  st.iso = isoArr[idx]; save();
+  alignShutter(true);
+});
+
+/* ---------- 測光 ---------- */
+let running=false, locked=false, stream=null, smooth=null;
+const video   = document.getElementById("view");
+const overlay = document.getElementById("overlay");
+const ring    = document.getElementById("ring");
+const evTag   = document.getElementById("evTag");
+const evVal   = document.getElementById("evVal");
+const lockTag = document.getElementById("lockTag");
+
+const cv = document.createElement("canvas");
+cv.width=64; cv.height=48;
+const cx2 = cv.getContext("2d",{willReadFrequently:true});
+
+document.getElementById("meterBox").addEventListener("click", async e=>{
+  if (e.target.closest("#gear")) return;
+  if (!running){ await startCam(); return; }
+  locked = !locked;
+  lockTag.style.display = locked ? "block" : "none";
+});
+
+async function startCam(){
+  overlay.querySelector(".big").textContent = "啟動中…";
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:"environment", width:{ideal:640} }, audio:false
+    });
+    video.srcObject = stream;
+    running = true; locked = false; smooth = null;
+    overlay.style.display = "none";
+    ring.style.display = "block";
+    evTag.classList.add("live");
+    loop();
+  }catch(err){
+    overlay.querySelector(".big").textContent = "無法開啟相機";
+    overlay.querySelector(".sm").textContent  = "請允許相機權限（需 HTTPS 或 localhost）";
+  }
+}
+
+function loop(){
+  if (!running) return;
+  requestAnimationFrame(loop);
+  if (locked || video.readyState < 2) return;
+
+  cx2.drawImage(video, 0, 0, cv.width, cv.height);
+  const {data} = cx2.getImageData(0,0,cv.width,cv.height);
+  const cx=cv.width/2, cy=cv.height/2, r=cv.height*0.35;
+  let sum=0, w=0;
+  for (let y=0;y<cv.height;y++) for (let x=0;x<cv.width;x++){
+    const i=(y*cv.width+x)*4;
+    const lum = 0.2126*Math.pow(data[i]/255,2.2)
+              + 0.7152*Math.pow(data[i+1]/255,2.2)
+              + 0.0722*Math.pow(data[i+2]/255,2.2);
+    const dx=x-cx, dy=y-cy;
+    const k = (dx*dx+dy*dy)<=r*r ? 4 : 1;
+    sum += lum*k; w += k;
+  }
+  const avg = Math.max(sum/w, 1e-6);
+  let e = 15 + log2(avg/0.18) + st.cal;
+  e = Math.max(-4, Math.min(21, e));
+  smooth = smooth===null ? e : smooth*0.85 + e*0.15;
+  const r1 = Math.round(smooth*3)/3;
+  if (Math.abs(r1-ev)>0.01){
+    ev = r1; st.lastEv = ev; save();
+    evVal.textContent = (Math.round(ev*10)/10).toString();
+    alignShutter(false);
+  }
+}
+
+/* ---------- 設定 ---------- */
+const dlg = document.getElementById("dlg");
+const cal = document.getElementById("cal");
+const calVal = document.getElementById("calVal");
+document.getElementById("gear").onclick = e=>{ e.stopPropagation(); renderDlg(); dlg.showModal(); };
+document.getElementById("dlgClose").onclick = ()=>{ dlg.close(); };
+cal.oninput = ()=>{ st.cal=+cal.value; calVal.textContent=st.cal.toFixed(1); save(); };
+
+function renderDlg(){
+  cal.value = st.cal; calVal.textContent = st.cal.toFixed(1);
+
+  // 相機列
+  const camChips = document.getElementById("camChips");
+  camChips.innerHTML = "";
+  for (const c of st.cameras){
+    const b = document.createElement("button");
+    b.className = c.id===st.camId ? "on" : "";
+    b.textContent = c.name;
+    b.onclick = ()=>{ st.camId=c.id; save(); renderDlg(); renderCamStrip(); rebuildWheels(); };
+    camChips.appendChild(b);
+  }
+  document.getElementById("camDel").style.display = st.cameras.length>1 ? "inline-block" : "none";
+  document.getElementById("apLbl").textContent = `光圈（${cam().name}）`;
+  document.getElementById("shLbl").textContent = `快門（${cam().name}）`;
+
+  // 這台相機的光圈 / 快門：點任一值可刪
+  fillCamChips("apChips", apList(), cam().ap, fmtAp);
+  fillCamChips("shChips", shList(), cam().sh, fmtSh);
+
+  // ISO：標準固定，只有自訂可刪
+  const isoChips = document.getElementById("isoChips");
+  isoChips.innerHTML = "";
+  for (const v of isoList()){
+    const s = document.createElement("span");
+    const isC = st.capIso.includes(v);
+    s.className = isC ? "custom" : "";
+    s.textContent = String(v);
+    if (isC) s.onclick = ()=>{
+      st.capIso.splice(st.capIso.indexOf(v),1); save(); renderDlg(); rebuildWheels();
+    };
+    else s.style.cursor = "default";
+    isoChips.appendChild(s);
+  }
+}
+function fillCamChips(id, sorted, arr, fmt){
+  const el = document.getElementById(id);
+  el.innerHTML = "";
+  for (const v of sorted){
+    const s = document.createElement("span");
+    s.textContent = fmt(v);
+    s.onclick = ()=>{
+      if (arr.length<=2){ alert("至少要留兩個檔位"); return; }
+      const i = arr.findIndex(x=>Math.abs(log2(Math.abs(x)/Math.abs(v)))<0.02 || x===v);
+      if (i>=0){ arr.splice(i,1); save(); renderDlg(); rebuildWheels(); }
+    };
+    el.appendChild(s);
+  }
+}
+for (const btn of document.querySelectorAll(".addrow button")){
+  btn.onclick = ()=>{
+    const k = btn.dataset.k;
+    if (k==="cam"){
+      const name = document.getElementById("camIn").value.trim();
+      if (!name){ alert("請輸入相機名稱"); return; }
+      if (st.cameras.some(c=>c.name===name)){ alert("名稱重複"); return; }
+      const id = Math.max(...st.cameras.map(c=>c.id))+1;
+      st.cameras.push({ id, name, ap:[...STD_AP], sh:[...STD_SH] });
+      st.camId = id;
+      document.getElementById("camIn").value = "";
+      save(); renderDlg(); renderCamStrip(); rebuildWheels();
+      return;
+    }
+    const input = {ap:"apIn", sh:"shIn", iso:"isoIn"}[k];
+    const raw = document.getElementById(input).value.trim();
+    let v = (k==="sh" && /^1\s*\/\s*[\d.]+$/.test(raw)) ? 1/parseFloat(raw.split("/")[1]) : parseFloat(raw);
+    const rng = {ap:[0.7,128], sh:[1/16000,120], iso:[3,409600]}[k];
+    if (!isFinite(v) || v<rng[0] || v>rng[1]){ alert("數值無效"); return; }
+    if (k==="ap"){ v=+v.toFixed(1); if(!cam().ap.some(x=>Math.abs(x-v)<0.01)) cam().ap.push(v); st.ap=v; }
+    if (k==="sh"){ if(!cam().sh.some(x=>Math.abs(log2(x/v))<0.02)) cam().sh.push(v); }
+    if (k==="iso"){ v=Math.round(v); if(!isoList().includes(v)) st.capIso.push(v); st.iso=v; }
+    document.getElementById(input).value = "";
+    save(); renderDlg(); rebuildWheels();
+  };
+}
+document.getElementById("camDel").onclick = ()=>{
+  if (st.cameras.length<=1) return;
+  if (!confirm("刪除相機「"+cam().name+"」？其光圈快門設定會一併刪除。")) return;
+  st.cameras = st.cameras.filter(c=>c.id!==st.camId);
+  st.camId = st.cameras[0].id;
+  save(); renderDlg(); renderCamStrip(); rebuildWheels();
+};
+
+/* ---------- 啟動 ---------- */
+evVal.textContent = (Math.round(ev*10)/10).toString();
+renderCamStrip();
+rebuildWheels();
+</script>
+</body>
+</html>
